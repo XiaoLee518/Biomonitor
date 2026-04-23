@@ -1,0 +1,1480 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 BioMonitor v25</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.5.0/FileSaver.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0f14;--bg2:#13161e;--bg3:#1a1e28;--bg4:#222636;
+  --line:#2a2f3e;--text:#c8cdd8;--text2:#7a8099;--text3:#454d66;
+  --accent:#4a9eff;--accent2:#2d7dd2;
+  --green:#3ecf8e;--red:#f2666a;--yellow:#f0b429;--purple:#9b7fe8;
+  --hr:#f2666a;--gsr:#f0b429;--rr:#3ecf8e;
+  --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
+
+/* ---- Sidebar ---- */
+.sidebar{width:196px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-logo{padding:18px 16px 14px;border-bottom:1px solid var(--line)}
+.sidebar-logo .brand{font-family:var(--mono);font-size:0.65rem;color:var(--text3);letter-spacing:2px;text-transform:uppercase;margin-bottom:3px}
+.sidebar-logo .name{font-size:0.95rem;font-weight:700;color:var(--text)}
+.nav-list{padding:10px 8px;flex:1}
+.nav-item{display:block;width:100%;padding:9px 12px;background:none;border:none;color:var(--text2);font-family:var(--sans);font-size:0.82rem;text-align:left;cursor:pointer;border-radius:5px;margin-bottom:2px;transition:background .15s,color .15s}
+.nav-item:hover{background:var(--bg3);color:var(--text)}
+.nav-item.active{background:var(--bg4);color:var(--accent);font-weight:600}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--line)}
+.ble-row{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:0.7rem;color:var(--text3)}
+.reset-icon-btn{margin-left:auto;width:20px;height:20px;border:1px solid var(--line);background:transparent;color:var(--text2);border-radius:4px;font-size:13px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;transition:all .15s;font-family:var(--mono)}
+.reset-icon-btn:hover{background:rgba(225,75,75,.15);color:var(--red);border-color:var(--red)}
+.reset-icon-btn.hidden{display:none}
+
+/* ===== Landing sensor card pop animation ===== */
+.landing-sensor-card:hover{background:rgba(255,255,255,.04)}
+.landing-sensor-card:active{transform:scale(.92)}
+@keyframes landingCardPop{
+  0%{transform:scale(1)}
+  30%{transform:scale(1.25)}
+  60%{transform:scale(.95)}
+  100%{transform:scale(1)}
+}
+.landing-sensor-card.pop{animation:landingCardPop .55s cubic-bezier(.34,1.56,.64,1)}
+
+/* ===== Mobile: make desktop ctrl bar usable on phone ===== */
+@media (max-width:760px){
+  #desktopCtrlBar{
+    gap:6px !important;
+    padding:8px 10px !important;
+  }
+  #desktopCtrlBar > button,
+  #desktopCtrlBar #dkBleBtn,
+  #desktopCtrlBar #dkDemoBtn,
+  #desktopCtrlBar #dkCsvBtn{
+    flex:1 1 auto;
+    min-width:64px;
+    font-size:.66rem !important;
+    padding:7px 10px !important;
+  }
+  #desktopCtrlBar #dkMainBtn{
+    flex:1 1 100%;
+    order:10;
+    padding:10px 16px !important;
+    font-size:.78rem !important;
+  }
+  #desktopCtrlBar #dkStopBtn{
+    order:11;
+    padding:9px 14px !important;
+  }
+}
+.ble-dot{width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.ble-dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+
+/* ---- Layout ---- */
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.page{display:none;flex-direction:column;min-height:100%}
+.page.active{display:flex}
+.page-header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--bg2);gap:10px;flex-wrap:wrap}
+.page-title{font-size:0.75rem;font-weight:600;color:var(--text2);letter-spacing:1.5px;text-transform:uppercase}
+.page-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.page-body{flex:1;padding:18px 22px;display:flex;flex-direction:column;gap:14px}
+
+/* ---- Buttons ---- */
+.btn{padding:6px 13px;border:1px solid var(--line);background:var(--bg3);color:var(--text);font-family:var(--sans);font-size:0.78rem;font-weight:600;cursor:pointer;border-radius:4px;transition:.15s}
+.btn:hover{background:var(--bg4);border-color:var(--text3)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent2);border-color:var(--accent2)}
+.btn-danger{background:transparent;border-color:var(--red);color:var(--red)}
+.btn-danger:hover{background:rgba(242,102,106,.1)}
+.btn-success{background:transparent;border-color:var(--green);color:var(--green)}
+.btn-success:hover{background:rgba(62,207,142,.1)}
+.btn-warning{background:transparent;border-color:var(--yellow);color:var(--yellow)}
+.btn-warning:hover{background:rgba(240,180,41,.1)}
+
+/* ---- Card ---- */
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:6px}
+
+/* ---- Timer bar ---- */
+.timer-row{display:flex;align-items:center;gap:18px;padding:13px 18px;flex-wrap:wrap}
+.timer-block{display:flex;flex-direction:column}
+.timer-label{font-family:var(--mono);font-size:0.62rem;color:var(--text3);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px}
+.timer-value{font-family:var(--mono);font-size:2rem;font-weight:600;color:var(--text);letter-spacing:2px;line-height:1}
+.timer-value.rec{color:var(--red)} .timer-value.cal{color:var(--yellow)}
+.timer-sep{width:1px;height:44px;background:var(--line);flex-shrink:0}
+.phase-badge{font-family:var(--mono);font-size:0.7rem;padding:4px 10px;border-radius:3px;letter-spacing:.5px}
+.ph-idle{background:var(--bg4);color:var(--text3)}
+.ph-calib{background:rgba(240,180,41,.12);color:var(--yellow);border:1px solid rgba(240,180,41,.25)}
+.ph-run{background:rgba(242,102,106,.12);color:var(--red);border:1px solid rgba(242,102,106,.25)}
+.ph-paused{background:rgba(155,127,232,.12);color:var(--purple);border:1px solid rgba(155,127,232,.25)}
+
+/* ---- Stress gauge ---- */
+.gauge-wrap{padding:13px 18px}
+.gauge-top{display:flex;align-items:center;gap:18px;margin-bottom:10px}
+.gauge-score{font-family:var(--mono);font-size:2.4rem;font-weight:600;min-width:74px;line-height:1}
+.gauge-detail{flex:1}
+.gauge-track{position:relative;height:26px;background:var(--bg3);border-radius:13px;border:1px solid var(--line);overflow:hidden}
+.gauge-fill{height:100%;border-radius:13px;background:linear-gradient(90deg,var(--green),var(--yellow),var(--red));transition:width .5s,opacity .3s}
+.gauge-needle{position:absolute;top:0;bottom:0;width:2px;background:#fff;border-radius:1px;transition:left .5s;transform:translateX(-50%)}
+.gauge-ticks{display:flex;justify-content:space-between;margin-top:5px;font-family:var(--mono);font-size:0.62rem;color:var(--text3)}
+.gauge-formula{font-size:0.7rem;color:var(--text3);font-family:var(--mono);margin-top:6px}
+.gauge-level{font-size:0.8rem;color:var(--text2)}
+
+/* ---- Overview chart ---- */
+.chart-wrap{position:relative;overflow:hidden}
+.chart-section{padding:14px 18px;min-width:0}
+.chart-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;flex-wrap:wrap;gap:6px}
+.chart-title{font-family:var(--mono);font-size:0.63rem;color:var(--text3);letter-spacing:1px;text-transform:uppercase}
+.legend{display:flex;gap:14px;flex-wrap:wrap}
+.leg{display:flex;align-items:center;gap:5px;font-size:0.68rem;color:var(--text2)}
+.leg-dot{width:8px;height:8px;border-radius:50%}
+.h200{height:200px} .h150{height:150px} .h120{height:120px} .h90{height:90px}
+
+/* ---- Metrics grid ---- */
+.metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.metric-card{background:var(--bg2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.metric-head{padding:9px 13px 7px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.metric-name{font-family:var(--mono);font-size:0.63rem;letter-spacing:1px;text-transform:uppercase}
+.metric-unit{font-family:var(--mono);font-size:0.63rem;color:var(--text3)}
+.metric-body{padding:10px 13px}
+.val-pair{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:9px}
+.vg .vl{font-size:0.63rem;color:var(--text3);font-family:var(--mono);margin-bottom:2px}
+.vg .vn{font-family:var(--mono);font-size:1.3rem;font-weight:600;line-height:1}
+.vg .vr{font-size:0.68rem;color:var(--text3);font-family:var(--mono);margin-top:2px}
+
+/* ---- Stats table ---- */
+.st{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:0.72rem;margin-top:7px}
+.st th{padding:5px 8px;text-align:left;color:var(--text3);font-size:0.62rem;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:.4px}
+.st td{padding:6px 8px;color:var(--text);border-bottom:1px solid rgba(42,47,62,.4)}
+.st tr:last-child td{border-bottom:none}
+.hl{color:var(--accent);font-weight:600}
+
+/* ---- GSR Alert ---- */
+.gsr-alert{padding:7px 13px;border-radius:4px;font-family:var(--mono);font-size:0.76rem;margin-top:7px;display:none}
+.gsr-alert.show{display:block}
+.gsr-ok{background:rgba(62,207,142,.07);color:var(--green);border:1px solid rgba(62,207,142,.18)}
+.gsr-warn{background:rgba(240,180,41,.07);color:var(--yellow);border:1px solid rgba(240,180,41,.18)}
+.gsr-hi{background:rgba(242,102,106,.07);color:var(--red);border:1px solid rgba(242,102,106,.18)}
+
+/* ---- Log table ---- */
+.log-wrap{max-height:170px;overflow-y:auto;border:1px solid var(--line);border-radius:4px}
+.lt{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:0.7rem}
+.lt th{padding:5px 9px;text-align:left;color:var(--text3);font-size:0.62rem;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg3);letter-spacing:.4px}
+.lt td{padding:4px 9px;color:var(--text2);border-bottom:1px solid rgba(42,47,62,.3)}
+
+/* ---- Sub tabs ---- */
+.sub-tabs{display:flex;border-bottom:1px solid var(--line);background:var(--bg2);flex-shrink:0}
+.sub-tab{padding:10px 17px;background:none;border:none;color:var(--text2);font-family:var(--sans);font-size:0.78rem;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.15s}
+.sub-tab:hover{color:var(--text)}
+.sub-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.sub-page{display:none}
+.sub-page.active{display:block}
+
+/* ---- Anomaly list ---- */
+.anomaly-item{display:flex;align-items:center;gap:9px;padding:7px 13px;border-left:3px solid var(--red);background:rgba(242,102,106,.04);margin-bottom:5px;border-radius:0 4px 4px 0;font-size:0.78rem;font-family:var(--mono)}
+.an-time{color:var(--text3);min-width:65px}
+.an-val{color:var(--red);margin-left:auto}
+
+/* ---- Tool row (advanced) ---- */
+.tool-row{display:flex;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tool-label{font-family:var(--mono);font-size:0.68rem;color:var(--text3);min-width:80px}
+.t-input{background:var(--bg3);border:1px solid var(--line);color:var(--text);padding:5px 9px;font-family:var(--mono);font-size:0.76rem;border-radius:4px;width:76px}
+.t-input:focus{outline:none;border-color:var(--accent)}
+.r-input{appearance:none;width:110px;height:4px;background:var(--bg4);border-radius:2px;cursor:pointer}
+.r-input::-webkit-slider-thumb{appearance:none;width:13px;height:13px;border-radius:50%;background:var(--accent);cursor:pointer}
+.r-val{font-family:var(--mono);font-size:0.76rem;color:var(--text2);min-width:36px;text-align:center}
+
+/* ---- Manual ---- */
+.manual-table{width:100%;border-collapse:collapse;font-size:0.78rem;margin:9px 0}
+.manual-table th{text-align:left;padding:6px 11px;color:var(--text3);font-size:0.68rem;letter-spacing:.4px;border-bottom:1px solid var(--line)}
+.manual-table td{padding:7px 11px;color:var(--text2);border-bottom:1px solid rgba(42,47,62,.4)}
+.manual-table td:first-child{color:var(--text);font-weight:600}
+.copy-box{background:var(--bg3);border:1px solid var(--line);border-radius:4px;padding:15px;font-size:0.78rem;color:var(--text2);white-space:pre-wrap;font-family:var(--mono);position:relative;margin-top:7px}
+.copy-btn{position:absolute;top:8px;right:8px;padding:3px 9px;background:var(--bg4);border:1px solid var(--line);color:var(--text3);font-size:0.68rem;cursor:pointer;border-radius:3px;font-family:var(--mono)}
+.copy-btn:hover{color:var(--text)}
+
+/* ---- Settings ---- */
+.settings-body{padding:22px;max-width:580px}
+.settings-section{margin-bottom:22px}
+.settings-h{font-size:0.7rem;font-weight:600;color:var(--text3);letter-spacing:1px;text-transform:uppercase;margin-bottom:11px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+.setting-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(42,47,62,.35)}
+.setting-row:last-child{border-bottom:none}
+.setting-label{font-size:0.82rem;color:var(--text2)}
+.setting-desc{font-size:0.7rem;color:var(--text3);margin-top:1px}
+.s-input{background:var(--bg3);border:1px solid var(--line);color:var(--text);padding:5px 9px;font-family:var(--mono);font-size:0.78rem;border-radius:4px;width:86px;text-align:right}
+.s-input:focus{outline:none;border-color:var(--accent)}
+.weight-total{font-family:var(--mono);font-size:0.78rem;padding:7px 12px;border-radius:4px;margin-top:6px}
+.wt-ok{background:rgba(62,207,142,.07);color:var(--green);border:1px solid rgba(62,207,142,.18)}
+.wt-bad{background:rgba(242,102,106,.07);color:var(--red);border:1px solid rgba(242,102,106,.18)}
+
+/* ---- Modal ---- */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:999}
+.modal-overlay.show{display:flex}
+.modal-box{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:26px;width:340px}
+.modal-title{font-size:.92rem;font-weight:700;margin-bottom:10px}
+.modal-sub{font-size:.78rem;color:var(--text2);margin-bottom:18px}
+.modal-status{font-family:var(--mono);font-size:.74rem;color:var(--text3);margin-bottom:14px;min-height:18px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
+
+/* ---- Scrollbars ---- */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--line)}
+
+.hidden{display:none!important}
+
+@media print {
+  body { background: #fff !important; }
+  .sidebar, .sub-tabs, .page-header, #subtab-report > div:first-child, #masterPanel, #demoPanel, #ctrlPanel { display: none !important; }
+  .main, .page, .sub-page { overflow: visible !important; height: auto !important; }
+  #reportPage { box-shadow: none !important; margin: 0 !important; width: 100% !important; }
+  canvas { max-width: 100%; }
+}
+
+/* ---- Video playback timeline marker ---- */
+.pb-marker{
+  position:absolute;top:0;bottom:0;width:3px;
+  background:var(--red);border-radius:2px;
+  cursor:pointer;transform:translateX(-50%);
+  transition:background .15s;
+}
+.pb-marker:hover{ background:#ff9a9c; }
+.pb-marker::after{
+  content:attr(data-label);
+  position:absolute;bottom:26px;left:50%;
+  transform:translateX(-50%);
+  background:var(--bg4);color:var(--text);
+  font-family:var(--mono);font-size:.58rem;
+  padding:2px 6px;border-radius:3px;
+  white-space:nowrap;display:none;
+  border:1px solid var(--line);
+}
+.pb-marker:hover::after{ display:block; }
+
+/* ================================================================
+   MOBILE RESPONSIVE  (≤768px)
+   ================================================================ */
+/* Hamburger toggle button (only visible on mobile) */
+#mobileMenuBtn{
+  display:none;
+  position:fixed;top:12px;left:12px;z-index:2000;
+  width:38px;height:38px;border-radius:8px;
+  background:var(--bg3);border:1px solid var(--line);
+  color:var(--text);font-size:1.1rem;cursor:pointer;
+  align-items:center;justify-content:center;
+  box-shadow:0 2px 8px rgba(0,0,0,.4);
+}
+/* Mobile bottom navigation bar */
+.mobile-nav{
+  display:none;
+  position:fixed;bottom:0;left:0;right:0;
+  background:var(--bg2);border-top:1px solid var(--line);
+  z-index:900;flex-shrink:0;
+}
+.mobile-nav-btn{
+  flex:1;padding:12px 4px;background:none;border:none;
+  color:var(--text3);font-family:var(--sans);font-size:.72rem;
+  cursor:pointer;letter-spacing:.3px;
+  transition:color .15s;
+}
+.mobile-nav-btn.active{ color:var(--accent);font-weight:600; }
+.mobile-nav-btn:hover{ color:var(--text); }
+
+@media (max-width:768px){
+  .mp-stat{ padding:5px 4px; }
+  .mp-stat-val{ font-size:.9rem; }
+  #mpMainBtn{ padding:10px; font-size:.82rem; }
+  /* ── Layout ── */
+  body{ flex-direction:column; overflow:hidden; }
+
+  /* Hide desktop sidebar, show mobile toggle */
+  .sidebar{
+    position:fixed;top:0;left:-100%;width:240px;height:100%;
+    z-index:1500;transition:left .25s ease;
+    box-shadow:4px 0 20px rgba(0,0,0,.5);
+  }
+  .sidebar.mobile-open{ left:0; }
+  #mobileMenuBtn{ display:flex; }
+  .mobile-nav{ display:flex; }
+
+  /* Sidebar overlay backdrop */
+  #sidebarBackdrop{
+    display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1400;
+  }
+  #sidebarBackdrop.show{ display:block; }
+
+  /* ── Main area ── */
+  .main{ flex:1;overflow-y:auto;padding-top:0; }
+  .page-body{
+    padding:10px 12px;
+    padding-bottom:74px; /* space for bottom nav */
+    gap:10px;
+  }
+
+  /* ── Page header ── */
+  .page-header{
+    padding:10px 12px 10px 58px; /* left pad for hamburger */
+    position:sticky;top:0;z-index:800;
+  }
+  .page-title{ font-size:.7rem; }
+  .page-actions{ gap:5px; }
+
+  /* ── Timer row ── */
+  .timer-row{
+    padding:10px 12px;gap:10px;
+  }
+  .timer-value{ font-size:1.4rem; }
+  .timer-sep{ height:30px; }
+
+  /* ── Metrics grid: 1 column on phone ── */
+  .metrics-row{ grid-template-columns:1fr; }
+
+  /* ── Status banner ── */
+  #statusBanner{ padding:10px 12px;gap:8px; }
+  #statusBtnHints{ display:none; } /* hide button hints on mobile */
+
+  /* ── Sub tabs ── */
+  .sub-tab{ padding:8px 12px;font-size:.72rem; }
+
+  /* ── Charts ── */
+  .h200{ height:150px; }
+  .h150{ height:120px; }
+  .h120{ height:100px; }
+  .h90{  height:75px;  }
+
+  /* ── Master panel: mobile only ── */
+  #masterPanel{
+    display:block;
+    right:8px;
+    bottom:62px; /* above mobile nav */
+    width:230px;
+  }
+  #desktopCtrlBar{display:none!important}
+
+  /* ── Demo / Ctrl floating panels ── */
+  #demoPanel,#ctrlPanel{
+    bottom:62px;left:8px;width:180px;
+  }
+
+  /* ── Report page ── */
+  #reportPage{
+    width:100%!important;
+    min-height:auto!important;
+    padding:20px!important;
+    box-shadow:none!important;
+  }
+
+  /* ── Modal ── */
+  .modal-box{ width:90vw!important;padding:18px!important; }
+
+  /* ── Playback modal ── */
+    width:95vw!important;max-height:90vh;overflow-y:auto;
+  }
+
+  /* ── Settings ── */
+  .settings-body{ padding:12px!important; }
+  .setting-row{ flex-direction:column;align-items:flex-start;gap:8px; }
+
+  /* ── Advanced tool row ── */
+  .tool-row{ flex-wrap:wrap;gap:6px; }
+
+  /* ── Manual ── */
+  .copy-box{ font-size:.7rem; }
+}
+
+@media (max-width:480px){
+  /* Very small phones */
+  .timer-row > .timer-sep{ display:none; }
+  .timer-row{ display:grid;grid-template-columns:1fr 1fr;gap:8px; }
+  .timer-block{ background:var(--bg3);border-radius:5px;padding:8px 10px; }
+  .timer-value{ font-size:1.2rem; }
+  .gauge-score{ font-size:1.8rem; }
+  .vg .vn{ font-size:1.1rem; }
+}
+
+/* ---- Demo Float Panel ---- */
+#demoPanel{
+  position:fixed;bottom:22px;right:22px;z-index:9999;
+  background:var(--bg2);border:1px solid var(--purple);border-radius:10px;
+  box-shadow:0 4px 28px rgba(155,127,232,.35);
+  width:200px;font-family:var(--sans);
+  transition:opacity .2s;
+}
+
+/* ---- Control Authority Panel ---- */
+#ctrlPanel{
+  position:fixed;bottom:22px;left:22px;z-index:9998;
+  background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 4px 24px rgba(0,0,0,.35);
+  width:210px;font-family:var(--sans);
+  transition:opacity .2s;
+}
+#ctrlPanel.hidden{display:none}
+#ctrlPanelHead{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:9px 12px 8px;border-bottom:1px solid var(--line);cursor:move;user-select:none
+}
+#ctrlPanelHead .cp-title{font-size:.72rem;font-weight:700;color:var(--green);letter-spacing:.5px}
+#ctrlPanelClose{background:none;border:none;color:var(--text3);font-size:1rem;cursor:pointer;line-height:1;padding:0 2px}
+#ctrlPanelClose:hover{color:var(--red)}
+#ctrlPanelBody{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.cp-authority{display:flex;gap:0;border-radius:5px;overflow:hidden;border:1px solid var(--line);margin-bottom:2px}
+.cp-auth-btn{flex:1;padding:6px 0;font-size:.72rem;font-weight:600;cursor:pointer;border:none;
+  background:var(--bg3);color:var(--text3);transition:.15s;text-align:center}
+.cp-auth-btn.active{background:var(--green);color:#000;font-weight:700}
+.cp-auth-btn:hover:not(.active){background:var(--bg4);color:var(--text)}
+.cp-status{font-family:var(--mono);font-size:.62rem;color:var(--text3);line-height:1.5;padding:4px 0}
+.cp-status .cp-mode-tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:.6rem;font-weight:700;margin-right:4px}
+.cp-mode-tag.esp{background:rgba(62,207,142,.15);color:var(--green);border:1px solid var(--green)}
+.cp-mode-tag.web{background:rgba(155,127,232,.15);color:var(--purple);border:1px solid var(--purple)}
+#demoPanel.hidden{display:none}
+#demoPanelHead{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:9px 12px 8px;border-bottom:1px solid var(--line);cursor:move;user-select:none
+}
+#demoPanelHead .dp-title{font-size:.72rem;font-weight:700;color:var(--purple);letter-spacing:.5px}
+#demoPanelClose{background:none;border:none;color:var(--text3);font-size:1rem;cursor:pointer;line-height:1;padding:0 2px}
+#demoPanelClose:hover{color:var(--red)}
+#demoPanelBody{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.dp-phase{font-family:var(--mono);font-size:.65rem;padding:4px 8px;border-radius:3px;text-align:center;letter-spacing:.5px;transition:.3s}
+.dp-btn{width:100%;padding:7px 0;border-radius:5px;font-size:.78rem;font-weight:600;cursor:pointer;border:1px solid;transition:.15s}
+.dp-btn-start{background:transparent;border-color:var(--green);color:var(--green)}
+.dp-btn-start:hover{background:rgba(62,207,142,.1)}
+.dp-btn-stop{background:transparent;border-color:var(--red);color:var(--red)}
+.dp-btn-stop:hover{background:rgba(242,102,106,.1)}
+.dp-btn-pause{background:transparent;border-color:var(--purple);color:var(--purple)}
+.dp-btn-pause:hover{background:rgba(155,127,232,.1)}
+.dp-calib-bar{height:6px;border-radius:3px;background:var(--bg4);overflow:hidden;margin-top:2px}
+.dp-calib-fill{height:100%;border-radius:3px;background:var(--yellow);width:0%;transition:width .9s linear}
+.dp-timer{font-family:var(--mono);font-size:.7rem;color:var(--text3);text-align:center}
+
+
+/* ============================================================
+   主控面板 Master Control Panel
+   ============================================================ */
+#masterPanel{
+  position:fixed;bottom:24px;right:24px;z-index:9999;
+  width:260px;background:var(--bg2);border-radius:14px;
+  box-shadow:0 8px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);
+  font-family:var(--sans);overflow:hidden;
+  display:none; /* desktop: hidden, mobile: shown via media query */
+}
+/* Desktop inline control bar */
+#desktopCtrlBar{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+#desktopCtrlBar .btn:hover{background:var(--bg4);color:var(--text)}
+/* Master panel mobile-only styles */
+#mpToggleBtn{display:none} /* shown via mobile media query below */
+/* master panel head/body kept for mobile */
+#mpHead{padding:11px 14px 10px;background:var(--bg3);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;}
+#mpConnDot{width:9px;height:9px;border-radius:50%;background:var(--text3);transition:.3s}
+#mpConnDot.ble{background:#3ecf8e;box-shadow:0 0 6px #3ecf8e}
+#mpConnDot.usb{background:#4fc3f7;box-shadow:0 0 6px #4fc3f7}
+#mpConnDot.demo{background:#9b7fe8;box-shadow:0 0 6px #9b7fe8}
+#mpConnLabel{flex:1;font-family:var(--mono);font-size:.62rem;color:var(--text3)}
+#mpPhasePill{font-family:var(--mono);font-size:.58rem;font-weight:700;padding:2px 7px;border-radius:10px;border:1px solid;letter-spacing:.5px}
+#mpPhasePill.idle   {background:rgba(100,100,120,.2);color:var(--text3);border-color:rgba(100,100,120,.3)}
+#mpPhasePill.calib  {background:rgba(240,180,41,.15);color:var(--yellow);border-color:rgba(240,180,41,.4)}
+#mpPhasePill.ready  {background:rgba(155,127,232,.15);color:var(--purple);border-color:rgba(155,127,232,.4)}
+#mpPhasePill.running{background:rgba(242,102,106,.15);color:var(--red);border-color:rgba(242,102,106,.4)}
+#mpPhasePill.paused {background:rgba(155,127,232,.12);color:var(--purple);border-color:rgba(155,127,232,.3)}
+#mpCalibBar{height:3px;background:var(--bg4);overflow:hidden}
+#mpCalibFill{height:100%;width:0%;background:linear-gradient(90deg,var(--yellow),var(--green));transition:width .9s linear}
+#mpBody{padding:14px 14px 12px;display:flex;flex-direction:column;gap:10px}
+#mpTimer{font-family:var(--mono);font-size:1.6rem;font-weight:700;text-align:center;color:var(--text);letter-spacing:2px}
+#mpTimerSub{text-align:center;font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:3px}
+#mpStats{display:flex;gap:6px}
+.mp-stat{flex:1;background:var(--bg3);border-radius:8px;padding:8px 6px;text-align:center;border:1px solid var(--line)}
+.mp-stat-val{font-family:var(--mono);font-size:1.1rem;font-weight:700;color:var(--text)}
+.mp-stat-lbl{font-family:var(--mono);font-size:.58rem;color:var(--text3);margin-top:2px}
+#mpScoreWrap{display:flex;align-items:center;gap:8px}
+#mpScoreBar{flex:1;height:8px;background:var(--bg4);border-radius:4px;overflow:hidden}
+#mpScoreFill{height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,var(--green),var(--yellow),var(--red));transition:width .4s}
+#mpScoreVal{font-family:var(--mono);font-size:.8rem;font-weight:700;min-width:28px;text-align:right}
+#mpMainBtn{
+  width:100%;padding:13px;border-radius:10px;font-size:.92rem;font-weight:700;
+  cursor:pointer;border:none;transition:.18s;letter-spacing:.3px;
+}
+#mpMainBtn.idle   {background:linear-gradient(135deg,#3ecf8e,#2eaf78);color:#000}
+#mpMainBtn.calib  {background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff}
+#mpMainBtn.ready  {background:linear-gradient(135deg,#9b7fe8,#7c5cbf);color:#fff}
+#mpMainBtn.running{background:linear-gradient(135deg,#f0b429,#d4940a);color:#000}
+#mpMainBtn.paused {background:linear-gradient(135deg,#3ecf8e,#2eaf78);color:#000}
+#mpMainBtn:hover{filter:brightness(1.1);transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+#mpMainBtn:active{transform:translateY(0);filter:brightness(.95)}
+#mpMainBtn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+#mpSecRow{display:grid;grid-template-columns:1fr;gap:8px}
+.mp-sec-btn{padding:9px 0;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer;transition:.15s}
+#mpStopBtn {border:1px solid var(--red);color:var(--red);background:transparent;width:100%}
+#mpStopBtn:hover:not(:disabled){background:rgba(242,102,106,.12)}
+.mp-sec-btn:disabled{opacity:.3;cursor:not-allowed}
+#mpHint{font-family:var(--mono);font-size:.62rem;color:var(--text3);text-align:center;line-height:1.5;min-height:2.4em}
+#mpConnRow{display:flex;gap:6px}
+.mp-conn-btn{flex:1;padding:8px 0;border-radius:7px;font-size:.7rem;font-weight:600;text-align:center;cursor:pointer;border:1px solid var(--line);color:var(--text3);background:var(--bg3);transition:.15s;user-select:none}
+.mp-conn-btn:hover{border-color:var(--text2);color:var(--text)}
+.mp-conn-btn.active{border-color:var(--green);color:var(--green);background:rgba(62,207,142,.08)}
+@keyframes mpPulse{from{box-shadow:0 0 0 0 rgba(242,102,106,.4)}to{box-shadow:0 0 0 8px rgba(242,102,106,0)}}
+
+/* ---- Master panel: mobile only ---- */
+#desktopCtrlBar{ display:flex; }
+
+@media (max-width:768px){
+  /* Compact mobile master panel */
+  #masterPanel{ display:block; position:fixed; bottom:62px; right:8px; width:220px; max-height:55vh; overflow-y:auto; z-index:9999; }
+  #mpTimer{ font-size:1.2rem; }
+  #mpBody{ padding:10px 10px 8px; gap:6px; }
+  .mp-stat{ padding:5px 4px; }
+  .mp-stat-val{ font-size:.9rem; }
+  #mpMainBtn{ padding:10px; font-size:.82rem; }
+  #desktopCtrlBar{ display:none !important; }
+  #mpMaxBtn{ display:block; }
+  #masterPanel.mp-maximized{
+    position:fixed !important; top:0 !important; left:0 !important; right:0 !important;
+    bottom:62px !important; width:100% !important; border-radius:0 !important; overflow-y:auto;
+  }
+  #masterPanel.mp-maximized #mpBody{ padding:14px 16px 20px; }
+  #masterPanel.mp-maximized #mpChartSection{ display:flex; }
+  #masterPanel.mp-maximized .mp-mini-canvas-wrap{ height:110px; }
+  #masterPanel.mp-maximized #mpHead{ cursor:default; }
+  #mpToggleBtn{ display:block !important; }
+  #masterPanel.mp-collapsed #mpBody{ display:none !important; }
+  #masterPanel.mp-collapsed #mpCalibBar{ display:none !important; }
+  #mpHead{ cursor:grab; }
+  #mpHead:active{ cursor:grabbing; }
+  .mobile-hide{ display:none !important; }
+}
+
+</style>
+</head>
+<body>
+
+<!-- ==================== Landing Page ==================== -->
+<div id="landingPage" style="position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;overflow-y:auto">
+  <div style="max-width:520px;width:100%">
+    <div style="font-family:var(--mono);font-size:.6rem;color:var(--accent);letter-spacing:4px;text-transform:uppercase;margin-bottom:12px">ESP32 Biometric System</div>
+    <div style="font-size:2.2rem;font-weight:800;color:var(--text);line-height:1.2;margin-bottom:6px">BioMonitor</div>
+    <div style="font-size:.85rem;color:var(--text2);margin-bottom:28px;line-height:1.7">
+      即時三通道生理壓力監測平台<br>
+      <span style="color:var(--text3);font-size:.72rem">Heart Rate · GSR · Respiration</span>
+    </div>
+    <div style="display:flex;justify-content:center;gap:24px;margin-bottom:32px;flex-wrap:wrap">
+      <div class="landing-sensor-card" data-sensor="hr" style="text-align:center;cursor:pointer;padding:8px 14px;border-radius:10px;transition:transform .25s cubic-bezier(.34,1.56,.64,1), background .25s">
+        <div style="font-size:1.6rem;font-weight:700;color:var(--hr)">PPG</div>
+        <div style="font-size:.58rem;color:var(--text3);margin-top:2px">心率感測</div>
+      </div>
+      <div class="landing-sensor-card" data-sensor="gsr" style="text-align:center;cursor:pointer;padding:8px 14px;border-radius:10px;transition:transform .25s cubic-bezier(.34,1.56,.64,1), background .25s">
+        <div style="font-size:1.6rem;font-weight:700;color:var(--gsr)">GSR</div>
+        <div style="font-size:.58rem;color:var(--text3);margin-top:2px">膚電反應</div>
+      </div>
+      <div class="landing-sensor-card" data-sensor="resp" style="text-align:center;cursor:pointer;padding:8px 14px;border-radius:10px;transition:transform .25s cubic-bezier(.34,1.56,.64,1), background .25s">
+        <div style="font-size:1.6rem;font-weight:700;color:var(--rr)">Resp</div>
+        <div style="font-size:.58rem;color:var(--text3);margin-top:2px">呼吸監測</div>
+      </div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:28px;text-align:left">
+      <div style="font-size:.72rem;font-weight:600;color:var(--text);margin-bottom:8px">關於我們</div>
+      <div style="font-size:.65rem;color:var(--text2);line-height:1.8">
+        本系統由學生團隊自主研發，採用 ESP32 微控制器搭載 MAX30102 光學心率感測器、GSR 膚電模組與應變規呼吸感測器，透過 BLE 無線傳輸與 Web Bluetooth API 實現即時生理數據可視化。<br><br>
+        本系統整合動態閾值心率偵測、斜率式呼吸偵測與膚電反應分析，提供即時壓力指數量化監測。
+      </div>
+    </div>
+    <button id="landingEnter" style="padding:14px 48px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:.88rem;font-weight:700;cursor:pointer;transition:opacity .2s;letter-spacing:1px">前往工具 →</button>
+    <div style="margin-top:16px;font-family:var(--mono);font-size:.5rem;color:var(--text3)">v27 · 2026</div>
+  </div>
+</div>
+
+<!-- Sidebar -->
+<!-- Mobile hamburger button -->
+<button id="mobileMenuBtn" aria-label="選單">☰</button>
+<!-- Sidebar backdrop overlay for mobile -->
+<div id="sidebarBackdrop"></div>
+
+<div class="sidebar">
+  <div class="sidebar-logo">
+    <div class="brand">ESP32 v2</div>
+    <div class="name">BioMonitor</div>
+ </div>
+  <div class="nav-list">
+    <button class="nav-item active" data-page="stress" data-zh="壓力監測" data-en="Live Monitor">壓力監測</button>
+    <button class="nav-item" data-page="analysis" data-zh="數據中心" data-en="Data Center">數據中心</button>
+    <button class="nav-item" data-page="settings" data-zh="參數設定" data-en="Settings">參數設定</button>
+ </div>
+  <div style="padding:8px 8px 0">
+    <button class="btn" id="btnLang" style="width:100%;font-family:var(--mono);font-size:.72rem;letter-spacing:1px">EN</button>
+ </div>
+  <div class="sidebar-footer">
+    <div class="ble-row" style="margin-bottom:6px">
+      <div class="ble-dot" id="bleDot"></div>
+      <span id="bleText">BLE 未連線</span>
+      <button class="reset-icon-btn hidden" id="btnResetIcon" title="重啟 ESP32">↻</button>
+ </div>
+ </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+
+<!-- ==================== 壓力監測 ==================== -->
+<div id="page-stress" class="page active">
+  <div class="page-header">
+    <span class="page-title">壓力監測 / Live</span>
+    <div class="page-actions">
+      <span class="phase-badge ph-idle" id="phaseBadge">IDLE</span>
+      <!-- 隱藏但保留供 JS 使用 -->
+      <button class="btn hidden" id="btnBle">BLE</button>
+      <button class="btn hidden" id="btnDemo">Demo</button>
+      <button class="btn hidden" id="btnStop">Stop</button>
+      <button class="btn hidden" id="btnPause">Pause</button>
+      <button class="btn hidden" id="btnExportCsv">CSV</button>
+ </div>
+ </div>
+
+  <div class="page-body">
+
+    <!-- ESP32 Status Banner -->
+    <div id="statusBanner" style="background:var(--bg3);border:1px solid var(--line);border-radius:6px;padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div id="statusDot" style="width:10px;height:10px;border-radius:50%;background:var(--text3);flex-shrink:0;transition:.4s"></div>
+        <div>
+          <div id="statusMainText" style="font-family:var(--mono);font-size:.9rem;font-weight:600;color:var(--text)">閒置中 — 等待 ESP32 操作</div>
+          <div id="statusSubText" style="font-family:var(--mono);font-size:.68rem;color:var(--text3);margin-top:2px"></div>
+ </div>
+ </div>
+ </div>
+    <div class="card">
+      <div class="timer-row">
+        <div class="timer-block">
+          <div class="timer-label">elapsed</div>
+          <div class="timer-value" id="mainTimer">00:00</div>
+ </div>
+        <div class="timer-sep"></div>
+        <div class="timer-block">
+          <div class="timer-label">phase</div>
+          <div id="phaseText" style="font-size:.84rem;color:var(--text2)">等待校正...</div>
+ </div>
+        <div class="timer-sep"></div>
+        <div class="timer-block">
+          <div class="timer-label">data points</div>
+          <div class="timer-value" id="dataCount" style="font-size:1.4rem">0</div>
+ </div>
+        <div class="timer-sep"></div>
+        <div class="timer-block">
+          <div class="timer-label">sample rate</div>
+          <div style="font-family:var(--mono);font-size:.88rem;color:var(--text2)" id="srDisplay">-- Hz</div>
+ </div>
+        <div class="timer-sep"></div>
+        <div class="timer-block">
+          <div class="timer-label">calib time</div>
+          <div style="font-family:var(--mono);font-size:.88rem;color:var(--text2)" id="calibTime">--s</div>
+ </div>
+ </div>
+ </div>
+
+    <!-- Desktop Control Bar (hidden on mobile) -->
+    <div id="desktopCtrlBar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;background:var(--bg3);border:1px solid var(--line);border-radius:8px">
+      <div style="display:flex;align-items:center;gap:6px;margin-right:8px">
+        <div id="dkConnDot" style="width:8px;height:8px;border-radius:50%;background:var(--text3);transition:.3s"></div>
+        <span id="dkConnLabel" style="font-family:var(--mono);font-size:.62rem;color:var(--text3)">未連線</span>
+      </div>
+      <button class="btn" id="dkBleBtn" style="font-size:.68rem;padding:5px 12px">BLE</button>
+      <button class="btn" id="dkDemoBtn" style="font-size:.68rem;padding:5px 12px">Demo</button>
+      <div style="flex:1"></div>
+      <button id="dkMainBtn" style="padding:6px 20px;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer;border:none;background:linear-gradient(135deg,#3ecf8e,#2eaf78);color:#000;transition:.15s">開始校正</button>
+      <button id="dkStopBtn" style="padding:6px 14px;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer;border:1px solid var(--red);color:var(--red);background:transparent">停止</button>
+      <button class="btn" id="dkCsvBtn" style="font-size:.68rem;padding:5px 12px">CSV</button>
+    </div>
+    <div class="card">
+      <div class="chart-section">
+        <div class="chart-header">
+          <span class="chart-title">綜合原始數據</span>
+          <div class="legend">
+            <div class="leg"><div class="leg-dot" style="background:var(--hr)"></div>HR</div>
+            <div class="leg"><div class="leg-dot" style="background:var(--gsr)"></div>GSR</div>
+            <div class="leg"><div class="leg-dot" style="background:var(--rr)"></div>Resp</div>
+            <div class="leg"><div class="leg-dot" style="background:rgba(242,102,106,.25);border:1px solid var(--hr)"></div>校正區間</div>
+ </div>
+ </div>
+        <div class="chart-wrap h200"><canvas id="cOverview"></canvas></div>
+ </div>
+ </div>
+
+    <!-- Stress gauge -->
+    <div class="card">
+      <div class="gauge-wrap">
+        <div class="chart-title" style="margin-bottom:10px">壓力指數（即時計算）</div>
+        <div class="gauge-top">
+          <div>
+            <div class="gauge-score" id="stressScore">--</div>
+            <div class="gauge-level" id="stressLevel">--</div>
+ </div>
+          <div class="gauge-detail">
+            <div class="gauge-track">
+              <div class="gauge-fill" id="gaugeFill" style="width:0%"></div>
+              <div class="gauge-needle" id="gaugeNeedle" style="left:0%"></div>
+ </div>
+            <div class="gauge-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+            <div class="gauge-formula mobile-hide">Stress = [(BPM−Base)/Base×0.20]×0.4 + [(RPM−Base)/Base×0.25]×0.4 + [(Base−GSR)/Base×0.20]×0.2   ×100</div>
+ </div>
+ </div>
+ </div>
+ </div>
+
+    <!-- Three metric cards -->
+    <div class="metrics-row">
+
+      <!-- HR -->
+      <div class="metric-card">
+        <div class="metric-head">
+          <span class="metric-name" style="color:var(--hr)">Heart Rate</span>
+          <span class="metric-unit">BPM</span>
+ </div>
+        <div class="metric-body">
+          <div class="val-pair">
+            <div class="vg">
+              <div class="vl">current BPM</div>
+              <div class="vn" style="color:var(--hr)" id="curHR">--</div>
+              <div class="vr">raw: <span id="curRawHR">--</span></div>
+ </div>
+            <div class="vg">
+              <div class="vl">baseline BPM</div>
+              <div class="vn" id="baseHR">--</div>
+              <div class="vr">base raw: <span id="baseRawHR">--</span></div>
+ </div>
+ </div>
+          <div class="chart-wrap h120"><canvas id="cLiveHR"></canvas></div>
+          <table class="st">
+            <thead><tr><th>基準值</th><th>當前均值</th><th>最大</th><th>最小</th><th>點數</th><th>波峰</th></tr></thead>
+            <tbody><tr>
+              <td id="s_hr_base">--</td><td class="hl" id="s_hr_avg">--</td>
+              <td id="s_hr_max">--</td><td id="s_hr_min">--</td>
+              <td id="s_hr_cnt">--</td><td id="s_hr_pk">--</td>
+ </tr></tbody>
+ </table>
+          <!-- ★ BPM live chart -->
+          <div style="margin-top:8px">
+            <div style="font-family:var(--mono);font-size:.63rem;color:var(--text3);margin-bottom:3px">BPM (Heart Rate)</div>
+            <div class="chart-wrap h90"><canvas id="cLiveBPM"></canvas></div>
+          </div>
+ </div>
+ </div>
+
+      <!-- GSR -->
+      <div class="metric-card">
+        <div class="metric-head">
+          <span class="metric-name" style="color:var(--gsr)">GSR</span>
+          <span class="metric-unit">raw ADC</span>
+ </div>
+        <div class="metric-body">
+          <div class="val-pair">
+            <div class="vg">
+              <div class="vl">current</div>
+              <div class="vn" style="color:var(--gsr)" id="curGSR">--</div>
+              <div class="vr">change: <span id="gsrChange">--</span></div>
+ </div>
+            <div class="vg">
+              <div class="vl">baseline GSR avg</div>
+              <div class="vn" id="baseGSR">--</div>
+              <div class="vr">threshold +15%</div>
+ </div>
+ </div>
+          <div class="chart-wrap h120"><canvas id="cLiveGSR"></canvas></div>
+          <div class="gsr-alert" id="gsrAlert"></div>
+          <table class="st">
+            <thead><tr><th>基準值</th><th>當前均值</th><th>最大</th><th>最小</th><th>點數</th><th>觸發</th></tr></thead>
+            <tbody><tr>
+              <td id="s_gsr_base">--</td><td class="hl" id="s_gsr_avg">--</td>
+              <td id="s_gsr_max">--</td><td id="s_gsr_min">--</td>
+              <td id="s_gsr_cnt">--</td><td id="s_gsr_trig">0</td>
+ </tr></tbody>
+ </table>
+ </div>
+ </div>
+
+      <!-- Resp -->
+      <div class="metric-card">
+        <div class="metric-head">
+          <span class="metric-name" style="color:var(--rr)">Respiration</span>
+          <span class="metric-unit">RPM</span>
+ </div>
+        <div class="metric-body">
+          <div class="val-pair">
+            <div class="vg">
+              <div class="vl">current RPM</div>
+              <div class="vn" style="color:var(--rr)" id="curRR">--</div>
+              <div class="vr">raw: <span id="curRawRR">--</span></div>
+ </div>
+            <div class="vg">
+              <div class="vl">baseline RPM</div>
+              <div class="vn" id="baseRR">--</div>
+              <div class="vr">base raw: <span id="baseRawRR">--</span></div>
+ </div>
+ </div>
+          <div class="chart-wrap h120"><canvas id="cLiveRR"></canvas></div>
+          <table class="st">
+            <thead><tr><th>基準值</th><th>當前均值</th><th>最大</th><th>最小</th><th>點數</th><th>波峰</th></tr></thead>
+            <tbody><tr>
+              <td id="s_rr_base">--</td><td class="hl" id="s_rr_avg">--</td>
+              <td id="s_rr_max">--</td><td id="s_rr_min">--</td>
+              <td id="s_rr_cnt">--</td><td id="s_rr_pk">--</td>
+ </tr></tbody>
+ </table>
+          <!-- ★ RPM live chart -->
+          <div style="margin-top:8px">
+            <div style="font-family:var(--mono);font-size:.63rem;color:var(--text3);margin-bottom:3px">RPM (Respiration Rate)</div>
+            <div class="chart-wrap h90"><canvas id="cLiveRPM"></canvas></div>
+          </div>
+ </div>
+ </div>
+
+ </div>
+
+    <!-- Raw log -->
+    <div class="card">
+      <div class="metric-head" style="padding:9px 15px">
+        <span class="metric-name">原始數據紀錄</span>
+        <span id="logCount" style="font-family:var(--mono);font-size:.68rem;color:var(--text3)">0 rows</span>
+ </div>
+      <div class="log-wrap">
+        <table class="lt">
+          <thead><tr>
+            <th>Time (s)</th><th>GSR raw</th><th>HR raw</th><th>Resp raw</th><th>BPM</th><th>RPM</th><th>Score</th>
+ </tr></thead>
+          <tbody id="liveLogBody"></tbody>
+ </table>
+ </div>
+ </div>
+
+ </div>
+</div>
+
+<!-- ==================== 數據中心 ==================== -->
+<div id="page-analysis" class="page">
+  <div class="page-header">
+    <span class="page-title" data-zh="數據中心" data-en="Data Center">數據中心 / Analysis</span>
+    <div class="page-actions" style="gap:6px">
+      <span id="anaFileName" style="font-family:var(--mono);font-size:.7rem;color:var(--text3)"></span>
+      <label class="btn" style="font-size:.68rem;cursor:pointer">
+        📂 匯入基準CSV
+        <input type="file" id="csvImportBase" accept=".csv" style="display:none">
+      </label>
+      <label class="btn" style="font-size:.68rem;cursor:pointer">
+        📂 匯入量測CSV
+        <input type="file" id="csvImportMeas" accept=".csv" style="display:none">
+      </label>
+    </div>
+ </div>
+
+  <div class="sub-tabs">
+    <button class="sub-tab active" data-subtab="summary">概覽</button>
+    <button class="sub-tab" data-subtab="advanced">進階分析</button>
+    <button class="sub-tab" data-subtab="compare">數據比較</button>
+    <button class="sub-tab" data-subtab="report">報告</button>
+    <button class="sub-tab" data-subtab="detail-charts">詳細圖表</button>
+    <button class="sub-tab" data-subtab="export-center">匯出中心</button>
+ </div>
+
+  <div class="page-body">
+
+    <!-- Summary -->
+    <div id="subtab-summary" class="sub-page active">
+      <div id="anaEmpty" style="padding:36px;text-align:center;color:var(--text3);font-size:.84rem">
+        尚無數據。請先進行測量，或從上方匯入 CSV 檔案。
+ </div>
+      <div id="anaContent" class="hidden">
+
+        <!-- 基準值 -->
+        <div class="card" style="margin-bottom:13px">
+          <div class="chart-section">
+            <div class="chart-header">
+              <span class="chart-title">靜息基準值（由 ESP32 校正後傳送）</span>
+ </div>
+            <div id="anaBaselineInfo" style="display:flex;gap:20px;padding:4px 0;font-family:var(--mono);font-size:.76rem;flex-wrap:wrap">
+              <span style="color:var(--text3)">尚無基準值</span>
+ </div>
+ </div>
+ </div>
+
+        <!-- ★ 全程緊張指數（最重要的圖，放最上面） -->
+        <div class="card" style="margin-bottom:13px;border-color:rgba(155,127,232,.4)">
+          <div class="chart-section">
+            <div class="chart-header">
+              <div>
+                <span class="chart-title" style="color:var(--purple)">全程緊張指數 / Full-Session Stress Index</span>
+                <div style="font-family:var(--mono);font-size:.63rem;color:var(--text3);margin-top:3px">
+                  來源：ESP32 即時計算值 | 紅虛線 = 緊張閾值 60
+ </div>
+ </div>
+              <div id="anaStressStats" style="font-family:var(--mono);font-size:.7rem;color:var(--text3);text-align:right"></div>
+ </div>
+            <!-- 色帶說明 -->
+            <div style="display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap">
+              <span style="font-family:var(--mono);font-size:.62rem;color:#3ecf8e">■ 0–30 放鬆</span>
+              <span style="font-family:var(--mono);font-size:.62rem;color:#f0b429">■ 30–60 輕度</span>
+              <span style="font-family:var(--mono);font-size:.62rem;color:#f2666a">■ 60–80 中度緊張</span>
+              <span style="font-family:var(--mono);font-size:.62rem;color:#c0392b">■ 80+ 高度緊張</span>
+ </div>
+            <div class="chart-wrap h200"><canvas id="cAnaStressFull"></canvas></div>
+ </div>
+ </div>
+
+        <!-- 三訊號 -->
+        <div class="card" style="margin-bottom:13px">
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">心率 HR raw（完整紀錄）</span></div>
+            <div class="chart-wrap h150"><canvas id="cAnaHR"></canvas></div>
+ </div>
+ </div>
+        <!-- ★ BPM analysis chart -->
+        <div class="card" style="margin-bottom:13px">
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title" style="color:var(--hr)">心跳速率 BPM（完整紀錄）</span></div>
+            <div class="chart-wrap h120"><canvas id="cAnaBPM"></canvas></div>
+ </div>
+ </div>
+        <div class="card" style="margin-bottom:13px">
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">膚電 GSR raw（完整紀錄）</span></div>
+            <div class="chart-wrap h150"><canvas id="cAnaGSR"></canvas></div>
+ </div>
+ </div>
+        <div class="card" style="margin-bottom:13px">
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">呼吸 Resp raw（完整紀錄）</span></div>
+            <div class="chart-wrap h150"><canvas id="cAnaRR"></canvas></div>
+ </div>
+ </div>
+        <!-- ★ RPM analysis chart -->
+        <div class="card" style="margin-bottom:13px">
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title" style="color:var(--rr)">呼吸速率 RPM（完整紀錄）</span></div>
+            <div class="chart-wrap h120"><canvas id="cAnaRPM"></canvas></div>
+ </div>
+ </div>
+
+        <!-- 異常偵測 -->
+        <div class="card" style="padding:15px">
+          <div class="metric-name" style="margin-bottom:11px">異常區間偵測</div>
+          <div id="anomalyList"></div>
+ </div>
+ </div>
+ </div>
+
+    <!-- Advanced -->
+    <div id="subtab-advanced" class="sub-page">
+      <div class="card" style="margin-bottom:13px">
+        <div class="tool-row">
+          <span class="tool-label">基準線範圍</span>
+          <input type="number" class="t-input" id="adv_cs" value="0"> s
+          <span style="color:var(--text3);font-size:.8rem">—</span>
+          <input type="number" class="t-input" id="adv_ce" value="10"> s
+          <button class="btn btn-primary" id="btnRecalc">重新計算</button>
+ </div>
+        <div class="tool-row">
+          <span class="tool-label">HR 權重</span>
+          <input type="range" class="r-input" id="adv_whr" min="0" max="1" step=".05" value=".45">
+          <span class="r-val" id="adv_whr_v">0.45</span>
+          <span class="tool-label" style="margin-left:10px">GSR 權重</span>
+          <input type="range" class="r-input" id="adv_wgsr" min="0" max="1" step=".05" value=".3">
+          <span class="r-val" id="adv_wgsr_v">0.30</span>
+          <span class="tool-label" style="margin-left:10px">RR 權重</span>
+          <input type="range" class="r-input" id="adv_wrr" min="0" max="1" step=".05" value=".25">
+          <span class="r-val" id="adv_wrr_v">0.25</span>
+ </div>
+ </div>
+      <div class="card" style="margin-bottom:13px">
+        <div class="chart-section">
+          <div class="chart-header">
+            <span class="chart-title">進階圖表</span>
+            <div style="display:flex;gap:6px">
+              <button class="btn" id="btnAddLine" style="padding:3px 8px;font-size:.68rem">+ 輔助線</button>
+              <button class="btn" id="btnZoomIn"  style="padding:3px 8px;font-size:.68rem">[+]</button>
+              <button class="btn" id="btnZoomOut" style="padding:3px 8px;font-size:.68rem">[-]</button>
+              <button class="btn" id="btnZoomReset" style="padding:3px 8px;font-size:.68rem">重置</button>
+ </div>
+ </div>
+          <div style="font-family:var(--mono);font-size:.6rem;color:var(--text3);margin-bottom:4px" id="advZoomHint">滾輪縮放 · 拖拉平移時間軸</div>
+          <div class="chart-wrap h200"><canvas id="cAdvanced"></canvas></div>
+ </div>
+ </div>
+      <div class="card" style="padding:15px">
+        <div class="metric-name" style="margin-bottom:11px">統計摘要</div>
+        <table class="st" id="advStatsTable">
+          <thead><tr><th>指標</th><th>基準值</th><th>均值</th><th>最大</th><th>最小</th><th>標準差</th><th>波峰數</th><th>BPM/RPM</th></tr></thead>
+          <tbody id="advStatsBody"></tbody>
+ </table>
+ </div>
+ </div>
+
+    <!-- Compare -->
+    <div id="subtab-compare" class="sub-page">
+      <div class="card" style="padding:14px 16px;margin-bottom:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <span class="metric-name">數據比較 — 可匯入多筆 CSV</span>
+          <div style="display:flex;gap:7px">
+            <button class="btn btn-primary" id="btnAddCompare">+ 新增 CSV</button>
+            <button class="btn btn-danger" id="btnClearCompare">清除全部</button>
+ </div>
+ </div>
+        <div id="compareFileList" style="font-family:var(--mono);font-size:.72rem;color:var(--text3);margin-bottom:10px;min-height:18px"></div>
+        <!-- Auxiliary line controls -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-family:var(--mono);font-size:.68rem;color:var(--text3)">輔助線 @t(s):</span>
+          <input type="number" id="cmpAuxT" class="t-input" placeholder="秒" style="width:64px">
+          <select id="cmpAuxTarget" style="background:var(--bg3);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:.72rem;padding:5px 8px;border-radius:4px">
+            <option value="score">壓力指數</option>
+            <option value="hr">HR</option>
+            <option value="gsr">GSR</option>
+            <option value="resp">Resp</option>
+ </select>
+          <button class="btn" id="btnCmpAddLine" style="font-size:.72rem;padding:4px 9px">+ 加線</button>
+          <button class="btn btn-danger" id="btnCmpClearLines" style="font-size:.72rem;padding:4px 9px">清輔助線</button>
+ </div>
+ </div>
+
+      <!-- Stats table -->
+      <div class="card" style="padding:14px 16px;margin-bottom:13px" id="cmpStatsCard">
+        <div class="metric-name" style="margin-bottom:10px">統計摘要比較</div>
+        <div style="overflow-x:auto">
+          <table class="st" id="cmpStatsTable" style="min-width:560px">
+            <thead><tr>
+              <th>檔案</th><th>時長(s)</th>
+              <th style="color:var(--purple)">Score均值</th><th style="color:var(--purple)">Score最大</th><th style="color:var(--purple)">事件(≥60)</th>
+              <th style="color:var(--hr)">HR均值</th><th style="color:var(--gsr)">GSR均值</th><th style="color:var(--rr)">Resp均值</th>
+ </tr></thead>
+            <tbody id="cmpStatsBody"></tbody>
+ </table>
+ </div>
+ </div>
+
+      <!-- Score chart -->
+      <div class="card" style="margin-bottom:13px">
+        <div class="chart-section">
+          <div class="chart-header">
+            <span class="chart-title">壓力指數比較</span>
+            <div id="cmpScoreLegend" class="legend"></div>
+ </div>
+          <div class="chart-wrap h200"><canvas id="cCompareScore"></canvas></div>
+ </div>
+ </div>
+      <!-- HR chart -->
+      <div class="card" style="margin-bottom:13px">
+        <div class="chart-section">
+          <div class="chart-header"><span class="chart-title">HR raw 比較</span></div>
+          <div class="chart-wrap h150"><canvas id="cCompareHR"></canvas></div>
+ </div>
+ </div>
+      <!-- GSR chart -->
+      <div class="card" style="margin-bottom:13px">
+        <div class="chart-section">
+          <div class="chart-header"><span class="chart-title">GSR raw 比較</span></div>
+          <div class="chart-wrap h150"><canvas id="cCompareGSR"></canvas></div>
+ </div>
+ </div>
+      <!-- Resp chart -->
+      <div class="card" style="margin-bottom:13px">
+        <div class="chart-section">
+          <div class="chart-header"><span class="chart-title">Resp raw 比較</span></div>
+          <div class="chart-wrap h150"><canvas id="cCompareResp"></canvas></div>
+ </div>
+ </div>
+ </div>
+
+    <!-- Report -->
+    <div id="subtab-report" class="sub-page">
+      <div style="padding:12px 16px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--line);background:var(--bg2)">
+        <button class="btn btn-primary" id="btnPrintReport">列印 / 儲存 PDF</button>
+        <span style="font-family:var(--mono);font-size:.7rem;color:var(--text3)">使用瀏覽器「另存為 PDF」匯出 A4 報告</span>
+ </div>
+      <div style="padding:20px;background:var(--bg);min-height:100%;overflow-x:auto">
+        <!-- A4 report area -->
+        <div id="reportPage" style="width:794px;min-height:1123px;background:#fff;color:#111;margin:0 auto;padding:44px 50px;font-family:'IBM Plex Sans',sans-serif;box-shadow:0 4px 40px rgba(0,0,0,.4);border-radius:4px">
+
+          <!-- Header -->
+          <div style="border-bottom:3px solid #1a1a2e;padding-bottom:14px;margin-bottom:20px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-end">
+              <div>
+                <div style="font-size:.6rem;letter-spacing:3px;text-transform:uppercase;color:#888;font-family:'IBM Plex Mono',monospace;margin-bottom:3px">ESP32 BioMonitor — Analysis Report</div>
+                <div style="font-size:1.5rem;font-weight:700;color:#1a1a2e">生理訊號壓力監測報告</div>
+ </div>
+              <div style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:.66rem;color:#888;line-height:1.7">
+                <div id="rpt_date"></div>
+                <div id="rpt_duration"></div>
+                <div id="rpt_pts"></div>
+ </div>
+ </div>
+ </div>
+
+          <!-- Baseline + 統計 並排 -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+            <div>
+              <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#888;font-family:'IBM Plex Mono',monospace;margin-bottom:7px;border-bottom:1px solid #eee;padding-bottom:3px">靜息基準值 / Baseline</div>
+              <div id="rpt_baseline" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+ </div>
+            <div>
+              <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#888;font-family:'IBM Plex Mono',monospace;margin-bottom:7px;border-bottom:1px solid #eee;padding-bottom:3px">緊張指數統計 / Stress Statistics</div>
+              <div id="rpt_stressStats" style="display:grid;grid-template-columns:repeat(5,1fr);grid-auto-rows:auto;gap:6px"></div>
+ </div>
+ </div>
+
+          <!-- 計算公式 -->
+          <div style="margin-bottom:14px;background:#f8f9ff;border:1px solid #e0e4f0;border-radius:4px;padding:7px 12px;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:#333">
+            <span style="color:#999;margin-right:8px">公式:</span>
+            <span id="rpt_formula"></span>
+ </div>
+
+          <!-- 校正期基準訊號 -->
+          <div style="margin-bottom:16px;border:1px solid #e8e8e8;border-radius:4px;padding:12px">
+            <div style="font-size:.62rem;letter-spacing:2px;text-transform:uppercase;color:#555;font-family:'IBM Plex Mono',monospace;margin-bottom:3px">
+              校正期訊號 / Calibration Period Signals
+ </div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:#aaa;margin-bottom:8px">
+              BPM（紅）· RPM（綠）· GSR raw（橘）— 校正期間採集數據
+ </div>
+            <div style="height:140px;position:relative"><canvas id="cRptCalib"></canvas></div>
+            <div style="display:flex;gap:16px;margin-top:6px;font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:#888">
+              <span><span style="color:#f2666a">■</span> BPM (左軸)</span>
+              <span><span style="color:#3ecf8e">■</span> RPM (左軸)</span>
+              <span><span style="color:#f0b429">■</span> GSR raw (右軸)</span>
+ </div>
+ </div>
+
+          <!-- ★ 全程緊張指數走勢（大圖，這是報告重點） -->
+          <div style="margin-bottom:16px;border:1px solid #e8e8e8;border-radius:4px;padding:12px">
+            <div style="font-size:.62rem;letter-spacing:2px;text-transform:uppercase;color:#555;font-family:'IBM Plex Mono',monospace;margin-bottom:3px">
+              全程緊張指數走勢 / Full-session Stress Index Timeline
+ </div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:#aaa;margin-bottom:8px">
+              橘色虛線 = 輕度閾值 60 | 紅色虛線 = 嚴重閾值 85
+ </div>
+            <div style="height:180px;position:relative"><canvas id="cRptStress"></canvas></div>
+            <!-- 緊張等級色帶說明 -->
+            <div style="display:flex;gap:16px;margin-top:6px;font-family:'IBM Plex Mono',monospace;font-size:.6rem;color:#888">
+              <span><span style="color:#3ecf8e">■</span> 0–30 放鬆</span>
+              <span><span style="color:#f0b429">■</span> 31–60 輕度緊張</span>
+              <span><span style="color:#f2666a">■</span> 61–85 中度緊張</span>
+              <span><span style="color:#c0392b">■</span> 86–100 嚴重緊張</span>
+ </div>
+ </div>
+
+          <!-- 三訊號並排 -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+            <div style="border:1px solid #eee;border-radius:4px;padding:10px">
+              <div style="font-size:.56rem;letter-spacing:1px;text-transform:uppercase;color:#aaa;font-family:'IBM Plex Mono',monospace;margin-bottom:6px">心率 BPM</div>
+              <div style="height:100px;position:relative"><canvas id="cRptHR"></canvas></div>
+ </div>
+            <div style="border:1px solid #eee;border-radius:4px;padding:10px">
+              <div style="font-size:.56rem;letter-spacing:1px;text-transform:uppercase;color:#aaa;font-family:'IBM Plex Mono',monospace;margin-bottom:6px">呼吸 RPM</div>
+              <div style="height:100px;position:relative"><canvas id="cRptGSR"></canvas></div>
+ </div>
+            <div style="border:1px solid #eee;border-radius:4px;padding:10px">
+              <div style="font-size:.56rem;letter-spacing:1px;text-transform:uppercase;color:#aaa;font-family:'IBM Plex Mono',monospace;margin-bottom:6px">膚電 GSR Δ%</div>
+              <div style="height:100px;position:relative"><canvas id="cRptResp"></canvas></div>
+ </div>
+ </div>
+
+          <!-- 緊張事件表格 -->
+          <div style="margin-bottom:20px">
+            <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#888;font-family:'IBM Plex Mono',monospace;margin-bottom:7px;border-bottom:1px solid #eee;padding-bottom:3px">
+              緊張事件偵測 / Stress Events (Score ≥ 60)
+ </div>
+            <div id="rpt_events"></div>
+ </div>
+
+          <!-- Footer -->
+          <div style="border-top:1px solid #eee;padding-top:10px;font-family:'IBM Plex Mono',monospace;font-size:.58rem;color:#ccc;display:flex;justify-content:space-between">
+            <span>ESP32 BioMonitor — Auto-generated Report</span>
+            <span id="rpt_footer_date"></span>
+ </div>
+
+ </div><!-- reportPage -->
+ </div>
+ </div>
+
+    <!-- ==================== 回放子頁面 ==================== -->
+
+    <!-- ====== 詳細圖表 sub-tab ====== -->
+    <div id="subtab-detail-charts" class="sub-page">
+      <div style="padding:18px 20px;display:flex;flex-direction:column;gap:16px">
+
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:.82rem;font-weight:700;color:var(--text)">📈 詳細圖表分析</div>
+            <div style="font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:3px">時間軸以 2 秒為單位 · 支援拖拉與縮放 · 各項運算細節即時展示</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" id="dcResetZoom" style="font-size:.72rem">重置縮放</button>
+            <button class="btn" id="dcDownloadAll" style="font-size:.72rem;border-color:var(--green);color:var(--green)">下載所有圖表</button>
+          </div>
+        </div>
+
+        <!-- BPM 圖表區 -->
+        <div class="card" id="dcBpmSection" style="margin-bottom:0">
+          <div class="chart-section">
+            <div class="chart-header">
+              <span class="chart-title" style="color:var(--red)">❤️ 心率 BPM</span>
+            </div>
+            <div style="position:relative;height:220px"><canvas id="dcBpmChart"></canvas></div>
+            <div id="dcBpmDetails" style="display:none;margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:.65rem;color:var(--text2);line-height:1.8">
+            </div>
+            <button class="btn" id="dcBpmToggle" style="font-size:.62rem;margin-top:6px;width:100%;text-align:center">展開運算細項 ▼</button>
+          </div>
+        </div>
+
+        <!-- RPM 圖表區 -->
+        <div class="card" id="dcRpmSection" style="margin-bottom:0">
+          <div class="chart-section">
+            <div class="chart-header">
+              <span class="chart-title" style="color:var(--cyan)">🫁 呼吸 RPM</span>
+            </div>
+            <div style="position:relative;height:220px"><canvas id="dcRpmChart"></canvas></div>
+            <div id="dcRpmDetails" style="display:none;margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:.65rem;color:var(--text2);line-height:1.8">
+            </div>
+            <button class="btn" id="dcRpmToggle" style="font-size:.62rem;margin-top:6px;width:100%;text-align:center">展開運算細項 ▼</button>
+          </div>
+        </div>
+
+        <!-- GSR 變化率圖表區 -->
+        <div class="card" id="dcGsrSection" style="margin-bottom:0">
+          <div class="chart-section">
+            <div class="chart-header">
+              <span class="chart-title" style="color:var(--yellow)">⚡ GSR 變化率（相對基線 %）</span>
+            </div>
+            <div style="position:relative;height:220px"><canvas id="dcGsrChart"></canvas></div>
+            <div id="dcGsrDetails" style="display:none;margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:.65rem;color:var(--text2);line-height:1.8">
+            </div>
+            <button class="btn" id="dcGsrToggle" style="font-size:.62rem;margin-top:6px;width:100%;text-align:center">展開運算細項 ▼</button>
+          </div>
+        </div>
+
+        <!-- 壓力指數趨勢圖 -->
+        <div class="card" id="dcStressSection" style="margin-bottom:0">
+          <div class="chart-section">
+            <div class="chart-header">
+              <span class="chart-title" style="color:var(--accent)">📊 壓力指數趨勢</span>
+            </div>
+            <div style="position:relative;height:220px"><canvas id="dcStressChart"></canvas></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ====== 匯出中心 sub-tab ====== -->
+    <div id="subtab-export-center" class="sub-page">
+      <div style="padding:18px 20px;display:flex;flex-direction:column;gap:16px">
+
+        <div>
+          <div style="font-size:.82rem;font-weight:700;color:var(--text)">📦 匯出中心</div>
+          <div style="font-family:var(--mono);font-size:.62rem;color:var(--text3);margin-top:3px">勾選需要匯出的項目，一鍵下載</div>
+        </div>
+
+        <div class="card" style="padding:14px">
+          <div style="display:flex;flex-direction:column;gap:10px;font-family:var(--mono);font-size:.72rem;color:var(--text2)">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="ecCsv" checked> CSV 完整數據（含校正前後 BPM、GSR 變化率、演算法細項）
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="ecBpmPng" checked> BPM 圖表（PNG）
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="ecRpmPng" checked> RPM 圖表（PNG）
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="ecGsrPng" checked> GSR 變化率圖表（PNG）
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="ecStressPng" checked> 壓力指數趨勢圖（PNG）
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="ecLiveCharts" checked> 所有網頁即時圖表（PNG）
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="ecReport" checked> 分析報告（PDF）
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            </label>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn" id="ecDownloadAll" style="flex:1;padding:10px;font-size:.78rem;font-weight:700;border-color:var(--green);color:var(--green)">全部下載</button>
+          <button class="btn" id="ecDownloadCsv" style="font-size:.72rem">單獨下載 CSV</button>
+          <button class="btn" id="ecDownloadCharts" style="font-size:.72rem">單獨下載圖表</button>
+        </div>
+
+        <div id="ecStatus" style="display:none;font-family:var(--mono);font-size:.65rem;color:var(--green);padding:8px 10px;background:rgba(62,207,142,.07);border-radius:6px"></div>
+
+      </div>
+    </div>
+
+ </div>
+</div>
+<div id="page-settings" class="page">
+  <div class="page-header">
+    <span class="page-title">參數設定 / Settings</span>
+    <div class="page-actions">
+      <button class="btn btn-success" id="btnSave">儲存並同步 ESP32</button>
+ </div>
+ </div>
+  <div class="page-body">
+    <div class="settings-body" style="max-width:100%">
+
+      <div class="settings-section">
+        <div class="settings-h">壓力指數公式</div>
+        <div style="background:var(--bg3);border:1px solid var(--line);border-radius:4px;padding:12px 14px;font-size:.72rem;color:var(--text2);font-family:var(--mono);line-height:2">
+          <b style="color:var(--hr)">S_HR</b>   = clamp((BPM &minus; Base_BPM×1.20) / (Base_BPM×0.30), 0, 1) × 100<br>
+          <b style="color:var(--rr)">S_RPM</b>  = clamp((RPM &minus; Base_RPM×1.25) / (Base_RPM×0.35), 0, 1) × 100<br>
+          <b style="color:var(--gsr)">S_GSR</b> = clamp((Base_GSR×0.80 &minus; GSR) / (Base_GSR×0.30), 0, 1) × 100<br>
+          <b style="color:var(--accent)">Stress</b> = S_HR×0.4 + S_RPM×0.4 + S_GSR×0.2<br>
+          <span style="color:var(--text3);font-size:.6rem">
+            HR 起點 1.20× 基準、頂點 1.50× 基準 · RPM 起點 1.25×、頂點 1.60× · GSR 訊號跌破 0.80× 才計分、跌至 0.50× 滿分 · 越高 = 越緊張
+          </span>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-h">系統參數</div>
+        <div class="setting-row" style="flex-wrap:wrap;gap:8px">
+          <div><div class="setting-label">校正時間 (秒)</div><div class="setting-desc">基準線採集持續時間（在 ESP32 按 BTN2 開始）</div></div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="range" class="r-input" id="sl_calib" min="5" max="120" step="5" value="60">
+            <input type="number" class="s-input" id="cfg_calib" value="60" style="width:70px">
+ </div>
+ </div>
+ </div>
+
+      <div class="settings-section">
+        <div class="settings-h" data-zh="封包傳入速率" data-en="Packet Rate">封包傳入速率</div>
+        <div style="background:var(--bg3);border:1px solid var(--line);border-radius:4px;padding:10px 14px;font-size:.75rem;color:var(--text3);font-family:var(--mono);margin-bottom:6px">
+          <span data-zh="每秒資料封包數（packets/s）。ESP32 最高約 50 Hz，建議 30。" data-en="Packets per second. ESP32 max ~50 Hz, recommended 30.">每秒資料封包數（packets/s）。ESP32 最高約 50 Hz，建議 30。</span>
+ </div>
+        <div class="setting-row" style="flex-wrap:wrap;gap:8px">
+          <div>
+            <div class="setting-label" data-zh="傳入速率 (Hz)" data-en="Data Rate (Hz)">傳入速率 (Hz)</div>
+            <div class="setting-desc" data-zh="ESP32 每秒發送封包次數（預設 30）" data-en="ESP32 packets per second sent (default 30)">ESP32 每秒發送封包次數（預設 30）</div>
+ </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="range" class="r-input" id="sl_data_rate" min="1" max="50" step="1" value="25">
+            <input type="number" class="s-input" id="cfg_data_rate" value="25" min="1" max="50" style="width:70px">
+ </div>
+ </div>
+ </div>
+
+      <div class="settings-section">
+        <div class="settings-h" data-zh="緊張判定閾值預覽" data-en="Stress Threshold Preview">緊張判定閾值預覽</div>
+        <div style="background:var(--bg3);border:1px solid var(--line);border-radius:4px;padding:12px 16px;font-family:var(--mono);font-size:.75rem;color:var(--text2);line-height:1.9">
+          <div>S_HR   = clamp((BPM − Base_BPM×1.20) / (Base_BPM×0.30), 0, 1) × 100 &nbsp;<span style="color:var(--text3)">→ 0 分在 1.20×、100 分在 1.50×</span></div>
+          <div>S_RPM  = clamp((RPM − Base_RPM×1.25) / (Base_RPM×0.35), 0, 1) × 100 &nbsp;<span style="color:var(--text3)">→ 0 分在 1.25×、100 分在 1.60×</span></div>
+          <div>S_GSR  = clamp((Base_GSR×0.80 − GSR) / (Base_GSR×0.30), 0, 1) × 100 &nbsp;<span style="color:var(--text3)">→ GSR 須跌破 0.80×Base 才計分、跌至 0.50× 滿分</span></div>
+          <div style="margin-top:6px;color:var(--accent)">Stress = S_HR × 0.4 + S_RPM × 0.4 + S_GSR × 0.2</div>
+          <div style="margin-top:4px;color:var(--text3)">LTI = Peak×0.4 + Avg×0.4 + 事件密度×0.2 &nbsp;（事件密度 = Score ≥ 100 的點數占比 × 100，報告頁顯示）</div>
+ </div>
+ </div>
+
+ </div>
+ </div>
+</div>
+
+</div><!-- .main -->
+
+<!-- Mobile bottom navigation -->
+<nav class="mobile-nav" id="mobileNav">
+  <button class="mobile-nav-btn active" data-page="stress">監測</button>
+  <button class="mobile-nav-btn" data-page="analysis">分析</button>
+  <button class="mobile-nav-btn" data-page="settings">設定</button>
+</nav>
+
+<!-- BLE Modal -->
+<div class="modal-overlay" id="bleModal">
+  <div class="modal-box">
+    <div class="modal-title">BLE 連線</div>
+    <div class="modal-sub">點擊「掃描裝置」後，從清單選取 ESP32_Biometric_System。</div>
+    <div class="modal-status" id="bleModalStatus">等待操作...</div>
+    <div class="modal-actions">
+      <button class="btn" id="btnBleCancel">取消</button>
+      <button class="btn btn-primary" id="btnBleScan">掃描裝置</button>
+ </div>
+ </div>
+</div>
+
+<!-- ==================== (resetConfirmOverlay removed) ==================== -->
+
+
+<!-- ==================== 影片回放 Modal ==================== -->
+
+<!-- Demo Float Panel -->
+<!-- ==================== (ctrlPanel removed — controls moved to inline desktopCtrlBar) ==================== -->
+
+<!-- ==================== Demo 模擬面板 ==================== -->
+<div id="demoPanel" class="hidden">
+  <div id="demoPanelHead">
+    <span class="dp-title">ESP32 模擬</span>
+    <button id="demoPanelClose">✕</button>
+ </div>
+  <div id="demoPanelBody">
+    <div class="dp-phase ph-idle" id="dpPhase">IDLE</div>
+    <div class="dp-timer" id="dpTimer">等待操作...</div>
+    <div class="dp-calib-bar"><div class="dp-calib-fill" id="dpCalibFill"></div></div>
+    <!-- BTN1：主控制開關（開機/校正/暫停/強制停止） -->
+    <button class="dp-btn dp-btn-start" id="dpBtn1">BTN1 — 開機 / 開始校正</button>
+    <!-- BTN2：量測開關（校正完成後才解鎖） -->
+    <button class="dp-btn dp-btn-pause" id="dpBtn2" disabled>BTN2 — 開始量測</button>
+    <div style="font-family:var(--mono);font-size:.58rem;color:var(--text3);line-height:1.7;margin-top:4px;padding-top:6px;border-top:1px solid var(--line)">
+      <b style="color:var(--text2)">操作流程：</b><br>
+      ① BTN1 開機 → 自動開始校正<br>
+      ② 校正完成 → BTN2 解鎖（綠色）<br>
+      ③ BTN2 → 開始量測<br>
+      ④ 量測中：BTN1=暫停 / BTN2=停止<br>
+      <span style="color:var(--text3)">校正時長 <span id="dpCalibSec">60</span>s</span>
+ </div>
+ </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     主控面板 Master Control Panel
+     ══════════════════════════════════════════════════ -->
+<!-- ==================== (masterPanel removed) ==================== -->
+
+<script src="js/config.js"></script> <!-- Global config & constants -->
+<script src="js/state.js"></script> <!-- Application state -->
+<script src="js/i18n.js"></script> <!-- Language strings -->
+<script src="js/charts-setup.js"></script> <!-- Chart theme & factory -->
+<script src="js/precision.js"></script> <!-- SQI, statistics, GSR decomposition -->
+<script src="js/filters.js"></script> <!-- Butterworth filter, FFT analyzer -->
+<script src="js/charts-live.js"></script> <!-- Live chart instances & update -->
+<script src="js/ui-core.js"></script> <!-- Timer, phase UI, BTN handling, page switching -->
+<script src="js/peak-resp.js"></script> <!-- Respiration peak detection -->
+<script src="js/peak-hr.js"></script> <!-- Heart rate peak detection -->
+<script src="js/packet.js"></script> <!-- Packet ingestion, baseline UI -->
+<script src="js/stats-ui.js"></script> <!-- Stress gauge, stats panel, log table -->
+<script src="js/ble.js"></script> <!-- BLE connection -->
+<script src="js/usb.js"></script> <!-- USB serial connection -->
+<script src="js/ctrl-hw.js"></script> <!-- Hardware control state machine -->
+<script src="js/ctrl-demo.js"></script> <!-- Demo mode state machine -->
+<script src="js/export.js"></script> <!-- CSV export -->
+<script src="js/report.js"></script> <!-- Report page & LTI calculation -->
+<script src="js/settings.js"></script> <!-- Settings page logic & i18n -->
+<script src="js/init.js"></script> <!-- Chart init & DOMContentLoaded -->
+<script src="js/events.js"></script> <!-- Event listeners & nav -->
+<script src="js/settings-adv.js"></script> <!-- Advanced settings handlers -->
+<script src="js/filter-ui.js"></script> <!-- Filter settings UI & toggle -->
+<script src="js/quality.js"></script> <!-- Quality panel (SQI) -->
+<script src="js/master-panel.js"></script> <!-- Master panel, demo control, mini charts -->
+<script src="js/desktop-ctrl.js"></script> <!-- Desktop inline controls -->
+<script src="js/analysis-charts.js"></script> <!-- Detail charts page -->
+<script src="js/export-center.js"></script> <!-- Export center page -->
+<script src="js/csv-import.js"></script> <!-- CSV import -->
+<script src="js/landing.js"></script> <!-- Landing page -->
+</body>
+</html>
